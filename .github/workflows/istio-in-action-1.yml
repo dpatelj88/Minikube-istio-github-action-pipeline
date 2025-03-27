@@ -122,6 +122,17 @@ jobs:
           echo "Listing BookInfo pods in default namespace:"
           kubectl get pods -n default
 
+          # Debug pods that aren't fully ready
+          echo "Checking for pods that aren't fully ready:"
+          for pod in $(kubectl get pods -n default --no-headers | grep -v "2/2" | awk '{print $1}'); do
+            echo "Pod $pod is not fully ready. Describing pod:"
+            kubectl describe pod $pod -n default
+            echo "Logs for $pod (application container):"
+            kubectl logs $pod -n default --container=reviews || echo "No logs available"
+            echo "Logs for $pod (istio-proxy container):"
+            kubectl logs $pod -n default --container=istio-proxy || echo "No logs available"
+          done
+
           # Verify Gateway and VirtualService
           echo "Listing Gateway and VirtualService:"
           kubectl get gateway -n default
@@ -132,6 +143,10 @@ jobs:
           export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
           export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
           echo "BookInfo is accessible at: http://$GATEWAY_URL/productpage"
+
+          # Test the URL with curl
+          echo "Testing access to BookInfo with curl:"
+          curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
 
           # Test the URL with curl
           echo "Testing access to BookInfo with curl:"
