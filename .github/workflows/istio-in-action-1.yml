@@ -7,61 +7,61 @@ on:
 
 jobs:
   MiniKube_Setup:
-    name: Setup Minikube & clean up
-    runs-on: self-hosted
-    outputs:
-      minikube_ip: ${{ steps.set-ip.outputs.minikube_ip }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+   name: Setup Minikube & clean up
+   runs-on: self-hosted
+   outputs:
+    minikube_ip: ${{ steps.set-ip.outputs.minikube_ip }}
+   steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-      - name: Install kubectl
-        run: |
-          if ! command -v kubectl &> /dev/null; then
-            echo "Installing kubectl..."
-            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            chmod +x kubectl
-            sudo mv kubectl /usr/local/bin/
-          fi
-          kubectl version --client
+    - name: Install kubectl
+      run: |
+        if ! command -v kubectl &> /dev/null; then
+          echo "Installing kubectl..."
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+        fi
+        kubectl version --client
 
-      - name: Start Minikube
-        run: |
-          if ! minikube status; then
-            echo "Starting Minikube with public DNS..."
-            minikube start --dns 8.8.8.8
-          else
-            echo "Minikube is already running. Stopping and restarting with public DNS..."
-            minikube stop
-            minikube start --dns 8.8.8.8
-            kubectl delete all --all --namespace=default
-            kubectl delete all --all -n istio-system
-          fi
+    - name: Start Minikube
+      run: |
+        if ! minikube status; then
+          echo "Starting Minikube with public DNS..."
+          minikube start --dns 8.8.8.8
+        else
+          echo "Minikube is already running. Stopping and restarting with public DNS..."
+          minikube stop
+          minikube start --dns 8.8.8.8
+          kubectl delete all --all --namespace=default
+          kubectl delete all --all -n istio-system
+        fi
 
-      - name: Fix Minikube DNS Configuration
-        run: |
-          echo "Fixing DNS configuration inside Minikube VM..."
-          minikube ssh -- "echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf"
-          minikube ssh -- "echo 'nameserver 8.8.4.4' | sudo tee -a /etc/resolv.conf"
-          minikube ssh -- "cat /etc/resolv.conf"
+    - name: Fix Minikube DNS Configuration
+      run: |
+        echo "Fixing DNS configuration inside Minikube VM..."
+        minikube ssh -- "echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf"
+        minikube ssh -- "echo 'nameserver 8.8.4.4' | sudo tee -a /etc/resolv.conf"
+        minikube ssh -- "cat /etc/resolv.conf"
 
-      - name: Test DNS Resolution
-        run: |
-          echo "Testing DNS resolution inside Minikube VM..."
-          minikube ssh -- "nslookup registry-1.docker.io" || echo "DNS resolution failed"
+    - name: Test DNS Resolution
+      run: |
+        echo "Testing DNS resolution inside Minikube VM..."
+        minikube ssh -- "nslookup registry-1.docker.io" || echo "DNS resolution failed"
 
-      - name: Set Minikube IP
-        id: set-ip
-        run: |
-          MINIKUBE_IP=$(minikube ip)
-          if [ -z "$MINIKUBE_IP" ]; then
-            echo "ERROR: Failed to get Minikube IP"
-            minikube status
-            exit 1
-          fi
-          echo "MINIKUBE_IP=$MINIKUBE_IP" >> $GITHUB_ENV
-          echo "minikube_ip=$MINIKUBE_IP" >> $GITHUB_OUTPUT
-          echo "Minikube IP set to $MINIKUBE_IP"
+    - name: Set Minikube IP
+      id: set-ip
+      run: |
+        MINIKUBE_IP=$(minikube ip)
+        if [ -z "$MINIKUBE_IP" ]; then
+          echo "ERROR: Failed to get Minikube IP"
+          minikube status
+          exit 1
+        fi
+        echo "MINIKUBE_IP=$MINIKUBE_IP" >> $GITHUB_ENV
+        echo "minikube_ip=$MINIKUBE_IP" >> $GITHUB_OUTPUT
+        echo "Minikube IP set to $MINIKUBE_IP"
 
   istioctl_install:
     runs-on: self-hosted
