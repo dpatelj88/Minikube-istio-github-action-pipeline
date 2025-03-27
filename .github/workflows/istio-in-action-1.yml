@@ -34,28 +34,48 @@ jobs:
   istioctl_install:
     runs-on: self-hosted
     needs: [MiniKube_Setup]
+    env:
+      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
     steps:
-      - name: Check if Istio is Installed
-        shell: bash
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install kubectl (if not already present)
         run: |
-          if istioctl x precheck; then
-            echo "Istio is already installed."
+          if ! command -v kubectl &> /dev/null; then
+            echo "Installing kubectl..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/
+          fi
+          kubectl version --client
+
+      - name: Check and Install Istio
+        run: |
+          if [ ! -d "$HOME/istio-1.25.0" ]; then
+            echo "Istio not found. Downloading and installing Istio 1.25.0 to $HOME..."
+            curl -LO https://github.com/istio/istio/releases/download/1.25.0/istio-1.25.0-linux-amd64.tar.gz
+            tar -xzf istio-1.25.0-linux-amd64.tar.gz -C $HOME
+            rm istio-1.25.0-linux-amd64.tar.gz
           else
-            if ! minikube status; then
-              echo "Starting Minikube..."
-              minikube start
-            else
-              echo "Minikube is already running."
-            fi
-            echo "Istio is not installed. Installing Istio..."
-            curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.25.0 sh -
-            export PATH=$HOME/.istioctl/bin:$PATH
+            echo "Istio directory already exists at $HOME/istio-1.25.0"
+          fi
 
+          export PATH="$HOME/istio-1.25.0/bin:$PATH"
+          echo "PATH updated: $PATH"
+
+          if ! command -v istioctl &> /dev/null; then
+            echo "ERROR: istioctl not found after setting PATH. Exiting..."
+            exit 1
+          fi
+
+          if kubectl get pod -n istio-system -l app=istiod --no-headers 2>/dev/null | grep -q Running; then
+            echo "Istio is already installed and running in the cluster."
+          else
+            echo "Installing Istio into Minikube..."
             istioctl install --set profile=demo -y
-            kubectl label namespace default istio-injection=enabled
-            echo "****************  http://$GATEWAY_URL/productpage   ********************"
-            istioctl x precheck
-
+            kubectl label namespace default istio-injection=enabled --overwrite
+            echo "Istio installed successfully."
           fi
 
   Minikube_IP:
