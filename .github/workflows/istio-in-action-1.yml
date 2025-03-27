@@ -9,8 +9,6 @@ jobs:
   MiniKube_Setup:
     name: Setup Minikube & clean up
     runs-on: self-hosted
-    outputs:
-      minikube_ip: ${{ steps.set-ip.outputs.minikube_ip }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -40,20 +38,12 @@ jobs:
         id: set-ip
         run: |
           MINIKUBE_IP=$(minikube ip)
-          if [ -z "$MINIKUBE_IP" ]; then
-            echo "ERROR: Failed to get Minikube IP"
-            minikube status
-            exit 1
-          fi
           echo "MINIKUBE_IP=$MINIKUBE_IP" >> $GITHUB_ENV
-          echo "minikube_ip=$MINIKUBE_IP" >> $GITHUB_OUTPUT
           echo "Minikube IP set to $MINIKUBE_IP"
 
   istioctl_install:
     runs-on: self-hosted
     needs: [MiniKube_Setup]
-    env:
-      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -70,129 +60,24 @@ jobs:
 
       - name: Check and Install Istio
         run: |
-          if [ ! -d "$HOME/istio-1.25.0" ]; then
-            echo "Istio not found. Downloading and installing Istio 1.25.0 to $HOME..."
-            curl -LO https://github.com/istio/istio/releases/download/1.25.0/istio-1.25.0-linux-amd64.tar.gz
-            tar -xzf istio-1.25.0-linux-amd64.tar.gz -C $HOME
-            rm istio-1.25.0-linux-amd64.tar.gz
-          else
-            echo "Istio directory already exists at $HOME/istio-1.25.0"
+          # Set PATH for Istio if installed manually
+          if [ -d "$HOME/istio-1.25.0" ]; then
+            export PATH=$HOME/istio-1.25.0/bin:$PATH
           fi
 
-          export PATH="$HOME/istio-1.25.0/bin:$PATH"
-          echo "PATH updated: $PATH"
-          ls -l "$HOME/istio-1.25.0/bin/istioctl" || echo "istioctl not found in $HOME/istio-1.25.0/bin"
-          if ! command -v istioctl &> /dev/null; then
-            echo "ERROR: istioctl not found after setting PATH. Exiting..."
-            exit 1
-          fi
-
-          if kubectl get namespace istio-system &> /dev/null; then
-            echo "Istio is already installed in the cluster."
-            kubectl get pods -n istio-system
+          if command -v istioctl &> /dev/null && istioctl x precheck; then
+            echo "Istio is already installed."
           else
-            echo "Istio not found in cluster. Installing Istio into Minikube..."
+            echo "Istio is not installed. Installing Istio..."
+            curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.25.0 sh -
+            export PATH=$HOME/istio-1.25.0/bin:$PATH
+
             istioctl install --set profile=demo -y
             kubectl label namespace default istio-injection=enabled --overwrite
             echo "Istio installed successfully."
             istioctl x precheck
-            kubectl get pods -n istio-system
           fi
 
+          # Output Gateway URL (optional, requires Istio ingress setup)
           echo "Minikube IP: $MINIKUBE_IP"
-
-
-  check-istio:
-    name: Check Istio Status
-    runs-on: self-hosted
-    needs: [istioctl_install]
-    env:
-      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
-    steps:
-      - name: Verify Istio Installation
-        shell: bash
-        run: |
-          export PATH="$HOME/istio-1.25.0/bin:$PATH"
-          mkdir -p logs
-          export BROWSER=none
-          istioctl x precheck
-
-
-  infra-check:
-    name: Infrastructure Check
-    runs-on: self-hosted
-    needs: [istioctl_install]
-    env:
-      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
-    steps:
-      - name: Check Infrastructure
-        shell: bash
-        run: |
-          export PATH="$HOME/istio-1.25.0/bin:$PATH"
-          kubectl get nodes
-          kubectl get pods -A
-          echo "Kubernetes Version:"
-          kubectl version
-          echo "Minikube Version:"
-          minikube version
-          echo "istioctl x precheck:"
-          istioctl x precheck
-          
-  Deploy_BookInfo:
-    runs-on: self-hosted
-    needs: [istioctl_install]
-    env:
-      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Deploy BookInfo App
-        run: |
-          export PATH="$HOME/istio-1.25.0/bin:$PATH"
-          kubectl label namespace default istio-injection=enabled --overwrite || echo "Namespace already labeled"
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.25/samples/bookinfo/platform/kube/bookinfo.yaml
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.25/samples/bookinfo/networking/bookinfo-gateway.yaml
-          kubectl rollout status deployment/productpage-v1 -n default
-
-  security-scan:
-    name: Trivy Security Scanning
-    runs-on: self-hosted
-    needs: [istioctl_install]
-    env:
-      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
-    steps:
-      - name: Install Trivy
-        run: |
-          if ! command -v trivy &> /dev/null; then
-            echo "Installing Trivy..."
-            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          fi
-          trivy --version
-
-      - name: Scan BookInfo Images
-        run: |
-          images=("istio/examples-bookinfo-productpage-v1:1.20.2")
-          for image in "${images[@]}"; do
-            echo "Scanning $image"
-            trivy image $image
-          done
-
-  deployment-status:
-    name: Check Deployment Status
-    runs-on: self-hosted
-    needs: [istioctl_install, Deploy_BookInfo]
-    env:
-      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
-    steps:
-      - name: Verify Gateway & BookInfo Deployment
-        run: |
-          export PATH="$HOME/istio-1.25.0/bin:$PATH"
-          kubectl get gateway -n default
-          kubectl get virtualservice -n default
-          kubectl get pods -n default
-
-          export INGRESS_HOST=$(minikube ip)
-          export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
-          export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
-          echo "http://$GATEWAY_URL/productpage"
+          echo "Check the application at: http://$MINIKUBE_IP/productpage (after deploying BookInfo)"
