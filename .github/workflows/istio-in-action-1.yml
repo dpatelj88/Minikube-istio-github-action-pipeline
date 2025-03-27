@@ -87,7 +87,6 @@ jobs:
             exit 1
           fi
 
-          # Check if Istio is installed by looking for the istiod pod
           if kubectl get pod -n istio-system -l app=istiod --no-headers 2>/dev/null | grep -q Running; then
             echo "Istio is already installed and running in the cluster."
             kubectl get pods -n istio-system
@@ -101,3 +100,39 @@ jobs:
           fi
 
           echo "Minikube IP: $MINIKUBE_IP"
+
+  Deploy_BookInfo:
+    runs-on: self-hosted
+    needs: [istioctl_install]
+    env:
+      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy BookInfo App
+        run: |
+          export PATH="$HOME/istio-1.25.0/bin:$PATH"
+          kubectl label namespace default istio-injection=enabled --overwrite || echo "Namespace already labeled"
+          kubectl apply -f bookinfo.yaml
+          kubectl apply -f bookinfo-gateway.yaml
+          kubectl rollout status deployment/productpage-v1 -n default
+
+          # Verify BookInfo pods
+          echo "Listing BookInfo pods in default namespace:"
+          kubectl get pods -n default
+
+          # Verify Gateway and VirtualService
+          echo "Listing Gateway and VirtualService:"
+          kubectl get gateway -n default
+          kubectl get virtualservice -n default
+
+          # Get the ingress URL
+          export INGRESS_HOST=$(minikube ip)
+          export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
+          export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
+          echo "BookInfo is accessible at: http://$GATEWAY_URL/productpage"
+
+          # Test the URL with curl
+          echo "Testing access to BookInfo with curl:"
+          curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
