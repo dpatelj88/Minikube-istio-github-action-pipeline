@@ -25,15 +25,25 @@ jobs:
           fi
           kubectl version --client
 
+      - name: Check Minikube Version
+        run: |
+          if ! command -v minikube &> /dev/null; then
+            echo "Minikube not found. Please install Minikube on the runner."
+            exit 1
+          fi
+          minikube version
+
       - name: Start Minikube
         run: |
           if ! minikube status; then
             echo "Starting Minikube..."
             minikube start
           else
-            echo "Minikube is already running."
+            echo "Minikube is already running. Stopping and restarting..."
+            minikube stop
+            minikube start
             kubectl delete all --all --namespace=default
-            kubectl delete all --all -n istio-system
+            kubectl delete namespace istio-system --ignore-not-found
           fi
 
       - name: Set Minikube IP
@@ -87,12 +97,14 @@ jobs:
             exit 1
           fi
 
-          # Check if Istio is installed by looking for the istio-system namespace
-          if kubectl get namespace istio-system &> /dev/null; then
-            echo "Istio is already installed in the cluster."
+          # Check if Istio is installed by looking for the istiod pod in the istio-system namespace
+          if kubectl get pod -n istio-system -l app=istiod --no-headers 2>/dev/null | grep -q Running; then
+            echo "Istio is already installed and running in the cluster."
             kubectl get pods -n istio-system
           else
-            echo "Istio not found in cluster. Installing Istio into Minikube..."
+            echo "Istio not found or not running in cluster. Installing Istio into Minikube..."
+            # Ensure the istio-system namespace exists
+            kubectl create namespace istio-system || echo "Namespace istio-system already exists"
             istioctl install --set profile=demo -y
             kubectl label namespace default istio-injection=enabled --overwrite
             echo "Istio installed successfully."
@@ -102,3 +114,65 @@ jobs:
 
           echo "Minikube IP: $MINIKUBE_IP"
           echo "Check the application at: http://$MINIKUBE_IP/productpage (after deploying BookInfo)"
+
+  Deploy_BookInfo:
+    runs-on: self-hosted
+    needs: [istioctl_install]
+    env:
+      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy BookInfo App
+        run: |
+          export PATH="$HOME/istio-1.25.0/bin:$PATH"
+          kubectl label namespace default istio-injection=enabled --overwrite || echo "Namespace already labeled"
+          kubectl apply -f bookinfo.yaml
+          kubectl apply -f bookinfo-gateway.yaml
+          kubectl rollout status deployment/productpage-v1 -n default
+
+          # Verify BookInfo pods
+          echo "Listing BookInfo pods in default namespace:"
+          kubectl get pods -n default
+
+          # Debug pods that aren't fully ready
+          echo "Checking for pods that aren't fully ready:"
+          for pod in $(kubectl get pods -n default --no-headers | grep -v "2/2" | awk '{print $1}'); do
+            echo "Pod $pod is not fully ready. Describing pod:"
+            kubectl describe pod $pod -n default
+            echo "Logs for $pod (application container):"
+            kubectl logs $pod -n default --container=reviews || echo "No logs available"
+            echo "Logs for $pod (istio-proxy container):"
+            kubectl logs $pod -n default --container=istio-proxy || echo "No logs available"
+          done
+
+          # Verify Gateway and VirtualService
+          echo "Listing Gateway and VirtualService:"
+          kubectl get gateway -n default
+          kubectl get virtualservice -n default
+
+          # Debug istio-ingressgateway service
+          echo "Details of istio-ingressgateway service:"
+          kubectl get svc istio-ingressgateway -n istio-system -o wide
+          kubectl describe svc istio-ingressgateway -n istio-system
+
+          # Get the ingress URL
+          export INGRESS_HOST=$(minikube ip)
+          export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
+          export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
+          echo "BookInfo is accessible at: http://$GATEWAY_URL/productpage"
+
+          # Test the URL with curl
+          echo "Testing access to BookInfo with curl from the runner:"
+          curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
+
+          # Instructions for local access
+          echo "To access BookInfo locally, you can use one of the following methods:"
+          echo "1. If you have direct access to the runner's network, open http://$GATEWAY_URL/productpage in your browser."
+          echo "2. Use minikube tunnel to expose the service locally:"
+          echo "   - Run 'minikube tunnel' on the runner."
+          echo "   - Then access http://localhost:$INGRESS_PORT/productpage from your browser."
+          echo "3. Port-forward the istio-ingressgateway service:"
+          echo "   - Run 'kubectl port-forward -n istio-system svc/istio-ingressgateway $INGRESS_PORT:$INGRESS_PORT'"
+          echo "   - Then access http://localhost:$INGRESS_PORT/productpage from your browser."
