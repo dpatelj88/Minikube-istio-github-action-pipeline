@@ -148,6 +148,53 @@ jobs:
           echo "Testing access to BookInfo with curl:"
           curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
 
+          # Instructions for local access
+          echo "To access BookInfo locally, you can use one of the following methods:"
+          echo "1. If you have direct access to the runner's network, open http://$GATEWAY_URL/productpage in your browser."
+          echo "2. Use minikube tunnel to expose the service locally:"
+          echo "   - Run 'minikube tunnel' on the runner."
+          echo "   - Then access http://localhost:$INGRESS_PORT/productpage from your browser."
+          echo "3. Port-forward the istio-ingressgateway service:"
+          echo "   - Run 'kubectl port-forward -n istio-system svc/istio-ingressgateway $INGRESS_PORT:$INGRESS_PORT'"
+          echo "   - Then access http://localhost:$INGRESS_PORT/productpage from your browser."
+
+  deploy-monitoring:
+    name: Deploy Monitoring (Grafana, Prometheus, Kiali, Jaeger, Loki)
+    runs-on: self-hosted
+    needs: [Deploy_BookInfo]
+    env:
+      MINIKUBE_IP: ${{ needs.MiniKube_Setup.outputs.minikube_ip }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy Monitoring Services
+        run: |
+          export PATH="$HOME/istio-1.25.0/bin:$PATH"
+          kubectl get namespace istio-system || kubectl create namespace istio-system
+          kubectl apply -f monitor/prometheus.yaml
+          kubectl apply -f monitor/grafana.yaml
+          kubectl apply -f monitor/kiali.yaml
+          kubectl apply -f monitor/jaeger.yaml
+          kubectl apply -f monitor/loki.yaml
+
+          # Wait for deployments to be ready
+          kubectl rollout status deployment/grafana -n istio-system
+          kubectl rollout status deployment/prometheus -n istio-system
+          kubectl rollout status deployment/kiali -n istio-system
+          kubectl rollout status deployment/jaeger -n istio-system
+
+          # Verify monitoring pods
+          echo "Listing monitoring pods in istio-system namespace:"
+          kubectl get pods -n istio-system -l 'app in (grafana, prometheus, kiali, jaeger)'
+
+          # Print instructions for accessing dashboards
+          echo "Monitoring tools deployed. To access the dashboards locally, use port-forwarding:"
+          echo "1. Kiali: Run 'kubectl port-forward -n istio-system svc/kiali 20001:20001' and open http://localhost:20001"
+          echo "2. Grafana: Run 'kubectl port-forward -n istio-system svc/grafana 3000:3000' and open http://localhost:3000"
+          echo "3. Prometheus: Run 'kubectl port-forward -n istio-system svc/prometheus 9090:9090' and open http://localhost:9090"
+          echo "4. Jaeger: Run 'kubectl port-forward -n istio-system svc/jaeger 16686:16686' and open http://localhost:16686"
+
           # Test the URL with curl
           echo "Testing access to BookInfo with curl:"
           curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
