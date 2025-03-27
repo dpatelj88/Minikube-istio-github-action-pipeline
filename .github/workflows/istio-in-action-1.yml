@@ -87,12 +87,12 @@ jobs:
             exit 1
           fi
 
-          # Check if Istio is installed by looking for the istio-system namespace
-          if kubectl get namespace istio-system &> /dev/null; then
-            echo "Istio is already installed in the cluster."
+          # Check if Istio is installed by looking for the istiod pod
+          if kubectl get pod -n istio-system -l app=istiod --no-headers 2>/dev/null | grep -q Running; then
+            echo "Istio is already installed and running in the cluster."
             kubectl get pods -n istio-system
           else
-            echo "Istio not found in cluster. Installing Istio into Minikube..."
+            echo "Istio not found or not running in cluster. Installing Istio into Minikube..."
             istioctl install --set profile=demo -y
             kubectl label namespace default istio-injection=enabled --overwrite
             echo "Istio installed successfully."
@@ -101,4 +101,3 @@ jobs:
           fi
 
           echo "Minikube IP: $MINIKUBE_IP"
-          #echo "Check the application at: http://$MINIKUBE_IP/productpage (after deploying BookInfo)"
