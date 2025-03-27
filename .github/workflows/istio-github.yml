@@ -1,0 +1,311 @@
+name: BookInfo CI/CD with Istio
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  MINIKUBE_IP: $(minikube ip)
+
+jobs:
+  MiniKube_Setup :
+    name: Setup Minikube & clean up 
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Start Minikube
+        run: |
+          if ! minikube status; then
+            echo "Starting Minikube..."
+            #minikube delete
+            #minikube start --cpus=4 --memory=8192 --kubernetes-version=v1.30.0 --driver=virtualbox
+            #minikube start --cpus=4 --memory=8192 --disk-size=50g --kubernetes-version=v1.32.0 --driver=virtualbox
+            minikube start
+           
+          else
+            echo "Minikube is already running."
+            kubectl delete all --all --namespace=default
+            kubectl delete all --all -n istio-system
+          fi
+
+  istioctl_install:
+    runs-on: self-hosted
+    needs: [MiniKube_Setup]
+    steps:
+      - name: Check if Istio is Installed
+        shell: bash
+        run: |
+          if istioctl x precheck; then
+            echo "Istio is already installed."
+          else
+            if ! minikube status; then
+              echo "Starting Minikube..."
+              minikube start
+            else
+              echo "Minikube is already running."
+            fi
+            echo "Istio is not installed. Installing Istio..."
+            curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.25.0 sh -
+            export PATH=$HOME/.istioctl/bin:$PATH
+
+            istioctl install --set profile=demo -y
+            kubectl label namespace default istio-injection=enabled
+            echo "****************  http://$GATEWAY_URL/productpage   ********************"
+            istioctl x precheck
+
+          fi
+
+  Minikube_IP:
+    runs-on: self-hosted
+    needs: istioctl_install
+    steps:
+      - name: Get Minikube IP
+        shell: bash
+        
+        run: |
+          export MINIKUBE_IP=$(minikube ip)
+          echo "Minikube IP: $MINIKUBE_IP"  
+
+  Install_Istio:
+    runs-on: self-hosted
+    needs: istioctl_install
+    steps:
+      - name: Check if Istio version
+        shell: bash
+        run: |
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          if istioctl x precheck; then
+            echo "Istio is already installed."
+            istioctl x precheck
+          else
+            echo "Istio is not installed"
+          fi
+
+  Deploy_BookInfo:
+    runs-on: self-hosted
+    needs: [istioctl_install,check-istio, Install_Istio, Minikube_IP, infra-check]
+    steps:
+      - name: Deploy BookInfo App
+        run: |
+          kubectl label namespace default istio-injection=enabled || echo "Namespace already labeled"
+          kubectl apply -f bookinfo.yaml
+          kubectl apply -f bookinfo-gateway.yaml
+          kubectl rollout status deployment/productpage-v1 -n default 
+
+  check-istio:
+    name: Check Istio Status
+    runs-on: self-hosted
+    needs: istioctl_install
+    steps:
+      - name: Verify Istio Installation
+        shell: bash
+        run: |  
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          mkdir -p logs
+          export BROWSER=none
+          istioctl x precheck
+
+  deploy-monitoring:
+    name: Deploy Monitoring (Grafana, Prometheus, Kiali)
+    runs-on: self-hosted
+    needs: [Deploy_BookInfo]
+    steps:
+      - name: Deploy Monitoring Services
+        run: |
+          kubectl get namespace istio-system || kubectl create namespace istio-system
+          kubectl apply -f moniter/
+          kubectl rollout status deployment/grafana -n istio-system 
+          kubectl rollout status deployment/prometheus -n istio-system 
+          kubectl rollout status deployment/kiali -n istio-system 
+
+          export INGRESS_HOST=$(minikube ip)
+          export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
+          export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
+          echo "http://$GATEWAY_URL/productpage"
+
+  monitor-grafana:
+    name: Monitor Grafana
+    runs-on: self-hosted
+    needs: [deploy-monitoring, Minikube_IP, run-tests]
+    steps:
+      - name: Check Grafana URL
+        shell: bash
+        run: |
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          cat logs/grafana-dashboard.log || echo "No grafana log"
+  monitor-jaeger:
+    name: Monitor Jaeger
+    runs-on: self-hosted
+    needs: [deploy-monitoring, Minikube_IP, run-tests]
+    steps:
+      - name: Check Jaeger URL
+        shell: bash
+        run: |
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          cat logs/jaeger-dashboard.log || echo "No jaeger log"
+
+  monitor-prometheus:
+    name: Monitor Prometheus
+    runs-on: self-hosted
+    needs: [deploy-monitoring, Minikube_IP, run-tests]
+    steps:
+      - name: Check Prometheus URL
+        shell: bash
+        run: |
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          cat logs/prometheus-dashboard.log || echo "No prometheus log"
+
+  monitor-kiali:
+    name: Monitor Kiali
+    runs-on: self-hosted
+    needs: [deploy-monitoring, Minikube_IP, run-tests]
+    steps:
+      - name: Check Kiali URL
+        shell: bash
+        run: |
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          cat logs/kiali-dashboard.log || echo "No kiali log"
+         # curl -s --head --fail "$KIALI_URL" || exit 1
+
+  monitor-jager:
+    name: Monitor Jaeger
+    runs-on: self-hosted
+    needs: [deploy-monitoring, Minikube_IP, run-tests]
+    steps:
+      - name: Check Jaeger URL
+        shell: bash
+        run: |
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          cat logs/jaeger-dashboard.log || echo "No jaeger log"
+
+  infra-check:
+    name: Infrastructure Check
+    runs-on: self-hosted
+    needs: [istioctl_install]
+    steps:
+      - name: Check Infrastructure
+        shell: bash
+        run: |
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          kubectl get nodes
+          kubectl get pods -A
+          echo "Kubernetes Version:"
+          kubectl version
+          echo "Minikube Version:"
+          minikube version
+          echo "istioctl x precheck:"
+          istioctl x precheck
+  security-scan:
+    name: Trivy Security Scanning
+    runs-on: self-hosted
+    needs: [istioctl_install]
+    steps:
+      - name: Check if Trivy is Installed
+        shell: bash
+        run: |
+
+          images=(
+            "istio/examples-bookinfo-productpage-v1:1.20.2"
+
+          )
+          # Loop over each image and run Trivy scan
+          for image in "${images[@]}"; do
+            echo "Scanning $image"
+            trivy image $image
+          done
+
+  deployment-status:
+    name: Check Deployment Status
+    runs-on: self-hosted
+    needs: [istioctl_install, Deploy_BookInfo, deploy-monitoring, run-tests]
+    steps:
+      - name: Verify Gateway & BookInfo Deployment
+        run: |
+
+          kubectl get gateway -n default
+          kubectl get virtualservice -n default
+          kubectl get pods -n default
+
+          export INGRESS_HOST=$(minikube ip)
+          export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
+          export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
+          echo "http://$GATEWAY_URL/productpage"
+
+  run-tests:
+    name: Run Tests-Port-forward
+    runs-on: self-hosted
+    needs: [Deploy_BookInfo, Minikube_IP, infra-check, security-scan,deploy-monitoring]
+    steps:
+      - name: Run Integration Tests
+        run: |
+          export PATH=$HOME/.istioctl/bin:$PATH 
+          export BROWSER=none
+          nohup istioctl dashboard kiali > logs/kiali-dashboard.log 2>&1 &
+          sleep 10
+          nohup istioctl dashboard prometheus > logs/prometheus-dashboard.log 2>&1 &
+          sleep 10
+          nohup istioctl dashboard grafana > logs/grafana-dashboard.log 2>&1 &
+          sleep 10
+          nohup istioctl dashboard jaeger > logs/jaeger-dashboard.log 2>&1 &
+          sleep 10
+          nohup istioctl dashboard zipkin > logs/zipkin-dashboard.log 2>&1 &
+          sleep 10
+          echo "All dashboards port-forwarded in background"
+
+          echo "istioctl x precheck:"
+          istioctl x precheck
+          echo "Checking access to Grafana, Kiali, Jaeger, and Zipkin..."
+ 
+          echo "==== Grafana Dashboard Log ===="
+          cat logs/grafana-dashboard.log || echo "No grafana log"
+          echo "==== Kiali Dashboard Log ===="
+          cat logs/kiali-dashboard.log || echo "No kiali log"
+          echo "==== Prometheus Dashboard Log ===="
+          cat logs/prometheus-dashboard.log || echo "No prometheus log"
+          echo "==== Jaeger Dashboard Log ===="
+          cat logs/jaeger-dashboard.log || echo "No jaeger log"
+          echo "==== Zipkin Dashboard Log ===="
+          cat logs/zipkin-dashboard.log || echo "No zipkin log"
+
+  deploy:
+    name: notify &Final Deployment Step
+    runs-on: self-hosted
+    needs: [monitor-grafana, monitor-jaeger, monitor-prometheus, monitor-kiali, infra-check, security-scan, deployment-status, run-tests, monitor-jager]
+
+    steps:
+      - name: Display Deployment URLs
+        shell: bash
+        run: |
+
+          echo "============email info ============= "
+          echo "Job Status: ${{ job.status }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Commit Message: ${{ github.event.head_commit.message }}"
+          echo "Commit Author: ${{ github.event.head_commit.author.name }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Job: ${{ github.job }}"
+          echo "Event Name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          export INGRESS_HOST=$(minikube ip)
+          export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
+          export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
+          echo "==== BookInfo app  ==== "
+          echo "http://$GATEWAY_URL/productpage"
+          echo "======================= ========"
+
+          echo "==== Grafana Dashboard Log ===="
+          cat logs/grafana-dashboard.log || echo "No grafana log"
+          echo "==== Kiali Dashboard Log ===="
+          cat logs/kiali-dashboard.log || echo "No kiali log"
+          echo "==== Prometheus Dashboard Log ===="
+          cat logs/prometheus-dashboard.log || echo "No prometheus log"
+          echo "==== Jaeger Dashboard Log ===="
+          cat logs/jaeger-dashboard.log || echo "No jaeger log"
+          echo "==== Zipkin Dashboard Log ===="
+          cat logs/zipkin-dashboard.log || echo "No zipkin log"
+
+
+
