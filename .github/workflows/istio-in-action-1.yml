@@ -60,24 +60,35 @@ jobs:
 
       - name: Check and Install Istio
         run: |
-          # Set PATH for Istio if installed manually
-          if [ -d "$HOME/istio-1.25.0" ]; then
-            export PATH=$HOME/istio-1.25.0/bin:$PATH
+          # Download and extract Istio if not already present
+          if [ ! -d "$HOME/istio-1.25.0" ]; then
+            echo "Istio not found. Downloading and installing Istio 1.25.0..."
+            curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.25.0 sh -
+          else
+            echo "Istio directory already exists."
           fi
 
-          if command -v istioctl &> /dev/null && istioctl x precheck; then
-            echo "Istio is already installed."
-          else
-            echo "Istio is not installed. Installing Istio..."
-            curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.25.0 sh -
-            export PATH=$HOME/istio-1.25.0/bin:$PATH
+          # Set PATH to include istioctl binary
+          export PATH=$HOME/istio-1.25.0/bin:$PATH
+          echo "PATH updated: $PATH"
 
+          # Verify istioctl is available
+          if ! command -v istioctl &> /dev/null; then
+            echo "ERROR: istioctl not found after setting PATH. Exiting..."
+            exit 1
+          fi
+
+          # Check if Istio is installed in the cluster
+          if istioctl x precheck; then
+            echo "Istio is already installed in the cluster."
+          else
+            echo "Installing Istio into Minikube cluster..."
             istioctl install --set profile=demo -y
             kubectl label namespace default istio-injection=enabled --overwrite
             echo "Istio installed successfully."
             istioctl x precheck
           fi
 
-          # Output Gateway URL (optional, requires Istio ingress setup)
+          # Output Minikube IP for reference
           echo "Minikube IP: $MINIKUBE_IP"
           echo "Check the application at: http://$MINIKUBE_IP/productpage (after deploying BookInfo)"
