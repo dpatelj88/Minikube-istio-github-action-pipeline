@@ -7,61 +7,61 @@ on:
 
 jobs:
   MiniKube_Setup:
-  name: Setup Minikube & clean up
-  runs-on: self-hosted
-  outputs:
-    minikube_ip: ${{ steps.set-ip.outputs.minikube_ip }}
-  steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+    name: Setup Minikube & clean up
+    runs-on: self-hosted
+    outputs:
+      minikube_ip: ${{ steps.set-ip.outputs.minikube_ip }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Install kubectl
-      run: |
-        if ! command -v kubectl &> /dev/null; then
-          echo "Installing kubectl..."
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
-        fi
-        kubectl version --client
+      - name: Install kubectl
+        run: |
+          if ! command -v kubectl &> /dev/null; then
+            echo "Installing kubectl..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/
+          fi
+          kubectl version --client
 
-    - name: Start Minikube
-      run: |
-        if ! minikube status; then
-          echo "Starting Minikube with public DNS..."
-          minikube start --dns 8.8.8.8
-        else
-          echo "Minikube is already running. Stopping and restarting with public DNS..."
-          minikube stop
-          minikube start --dns 8.8.8.8
-          kubectl delete all --all --namespace=default
-          kubectl delete all --all -n istio-system
-        fi
+      - name: Start Minikube
+        run: |
+          if ! minikube status; then
+            echo "Starting Minikube with public DNS..."
+            minikube start --dns 8.8.8.8
+          else
+            echo "Minikube is already running. Stopping and restarting with public DNS..."
+            minikube stop
+            minikube start --dns 8.8.8.8
+            kubectl delete all --all --namespace=default
+            kubectl delete all --all -n istio-system
+          fi
 
-    - name: Fix Minikube DNS Configuration
-      run: |
-        echo "Fixing DNS configuration inside Minikube VM..."
-        minikube ssh -- "echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf"
-        minikube ssh -- "echo 'nameserver 8.8.4.4' | sudo tee -a /etc/resolv.conf"
-        minikube ssh -- "cat /etc/resolv.conf"
+      - name: Fix Minikube DNS Configuration
+        run: |
+          echo "Fixing DNS configuration inside Minikube VM..."
+          minikube ssh -- "echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf"
+          minikube ssh -- "echo 'nameserver 8.8.4.4' | sudo tee -a /etc/resolv.conf"
+          minikube ssh -- "cat /etc/resolv.conf"
 
-    - name: Test DNS Resolution
-      run: |
-        echo "Testing DNS resolution inside Minikube VM..."
-        minikube ssh -- "nslookup registry-1.docker.io" || echo "DNS resolution failed"
+      - name: Test DNS Resolution
+        run: |
+          echo "Testing DNS resolution inside Minikube VM..."
+          minikube ssh -- "nslookup registry-1.docker.io" || echo "DNS resolution failed"
 
-    - name: Set Minikube IP
-      id: set-ip
-      run: |
-        MINIKUBE_IP=$(minikube ip)
-        if [ -z "$MINIKUBE_IP" ]; then
-          echo "ERROR: Failed to get Minikube IP"
-          minikube status
-          exit 1
-        fi
-        echo "MINIKUBE_IP=$MINIKUBE_IP" >> $GITHUB_ENV
-        echo "minikube_ip=$MINIKUBE_IP" >> $GITHUB_OUTPUT
-        echo "Minikube IP set to $MINIKUBE_IP"
+      - name: Set Minikube IP
+        id: set-ip
+        run: |
+          MINIKUBE_IP=$(minikube ip)
+          if [ -z "$MINIKUBE_IP" ]; then
+            echo "ERROR: Failed to get Minikube IP"
+            minikube status
+            exit 1
+          fi
+          echo "MINIKUBE_IP=$MINIKUBE_IP" >> $GITHUB_ENV
+          echo "minikube_ip=$MINIKUBE_IP" >> $GITHUB_OUTPUT
+          echo "Minikube IP set to $MINIKUBE_IP"
 
   istioctl_install:
     runs-on: self-hosted
@@ -95,7 +95,7 @@ jobs:
 
           export PATH="$HOME/istio-1.25.0/bin:$PATH"
           echo "PATH updated: $PATH"
-          ls -l "$HOME/istio-1.25.0/bin/istioctl" || echo "istioctl not found in $HOME/istio-1.25.0/bin"
+
           if ! command -v istioctl &> /dev/null; then
             echo "ERROR: istioctl not found after setting PATH. Exiting..."
             exit 1
@@ -103,17 +103,12 @@ jobs:
 
           if kubectl get pod -n istio-system -l app=istiod --no-headers 2>/dev/null | grep -q Running; then
             echo "Istio is already installed and running in the cluster."
-            kubectl get pods -n istio-system
           else
-            echo "Istio not found or not running in cluster. Installing Istio into Minikube..."
+            echo "Installing Istio into Minikube..."
             istioctl install --set profile=demo -y
             kubectl label namespace default istio-injection=enabled --overwrite
             echo "Istio installed successfully."
-            istioctl x precheck
-            kubectl get pods -n istio-system
           fi
-
-          echo "Minikube IP: $MINIKUBE_IP"
 
   Deploy_BookInfo:
     runs-on: self-hosted
@@ -127,50 +122,12 @@ jobs:
       - name: Deploy BookInfo App
         run: |
           export PATH="$HOME/istio-1.25.0/bin:$PATH"
-          kubectl label namespace default istio-injection=enabled --overwrite || echo "Namespace already labeled"
           kubectl apply -f bookinfo.yaml
           kubectl apply -f bookinfo-gateway.yaml
           kubectl rollout status deployment/productpage-v1 -n default
 
-          # Verify BookInfo pods
-          echo "Listing BookInfo pods in default namespace:"
+          echo "Listing BookInfo pods:"
           kubectl get pods -n default
-
-          # Debug pods that aren't fully ready
-          echo "Checking for pods that aren't fully ready:"
-          for pod in $(kubectl get pods -n default --no-headers | grep -v "2/2" | awk '{print $1}'); do
-            echo "Pod $pod is not fully ready. Describing pod:"
-            kubectl describe pod $pod -n default
-            echo "Logs for $pod (application container):"
-            kubectl logs $pod -n default --container=reviews || echo "No logs available"
-            echo "Logs for $pod (istio-proxy container):"
-            kubectl logs $pod -n default --container=istio-proxy || echo "No logs available"
-          done
-
-          # Verify Gateway and VirtualService
-          echo "Listing Gateway and VirtualService:"
-          kubectl get gateway -n default
-          kubectl get virtualservice -n default
-
-          # Get the ingress URL
-          export INGRESS_HOST=$(minikube ip)
-          export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
-          export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
-          echo "BookInfo is accessible at: http://$GATEWAY_URL/productpage"
-
-          # Test the URL with curl
-          echo "Testing access to BookInfo with curl:"
-          curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
-
-          # Instructions for local access
-          echo "To access BookInfo locally, you can use one of the following methods:"
-          echo "1. If you have direct access to the runner's network, open http://$GATEWAY_URL/productpage in your browser."
-          echo "2. Use minikube tunnel to expose the service locally:"
-          echo "   - Run 'minikube tunnel' on the runner."
-          echo "   - Then access http://localhost:$INGRESS_PORT/productpage from your browser."
-          echo "3. Port-forward the istio-ingressgateway service:"
-          echo "   - Run 'kubectl port-forward -n istio-system svc/istio-ingressgateway $INGRESS_PORT:$INGRESS_PORT'"
-          echo "   - Then access http://localhost:$INGRESS_PORT/productpage from your browser."
 
   deploy-monitoring:
     name: Deploy Monitoring (Grafana, Prometheus, Kiali, Jaeger, Loki)
@@ -185,30 +142,18 @@ jobs:
       - name: Deploy Monitoring Services
         run: |
           export PATH="$HOME/istio-1.25.0/bin:$PATH"
-          kubectl get namespace istio-system || kubectl create namespace istio-system
           kubectl apply -f monitor/prometheus.yaml
           kubectl apply -f monitor/grafana.yaml
           kubectl apply -f monitor/kiali.yaml
           kubectl apply -f monitor/jaeger.yaml
           kubectl apply -f monitor/loki.yaml
 
-          # Wait for deployments to be ready
           kubectl rollout status deployment/grafana -n istio-system
           kubectl rollout status deployment/prometheus -n istio-system
           kubectl rollout status deployment/kiali -n istio-system
           kubectl rollout status deployment/jaeger -n istio-system
 
-          # Verify monitoring pods
-          echo "Listing monitoring pods in istio-system namespace:"
+          echo "Listing monitoring pods:"
           kubectl get pods -n istio-system -l 'app in (grafana, prometheus, kiali, jaeger)'
 
-          # Print instructions for accessing dashboards
-          echo "Monitoring tools deployed. To access the dashboards locally, use port-forwarding:"
-          echo "1. Kiali: Run 'kubectl port-forward -n istio-system svc/kiali 20001:20001' and open http://localhost:20001"
-          echo "2. Grafana: Run 'kubectl port-forward -n istio-system svc/grafana 3000:3000' and open http://localhost:3000"
-          echo "3. Prometheus: Run 'kubectl port-forward -n istio-system svc/prometheus 9090:9090' and open http://localhost:9090"
-          echo "4. Jaeger: Run 'kubectl port-forward -n istio-system svc/jaeger 16686:16686' and open http://localhost:16686"
-
-          # Test the URL with curl
-          echo "Testing access to BookInfo with curl:"
-          curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
+          echo "Monitoring tools deployed. Use port-forwarding to access dashboards."
