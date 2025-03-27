@@ -63,21 +63,25 @@ jobs:
 
           export PATH="$HOME/istio-1.25.0/bin:$PATH"
           echo "PATH updated: $PATH"
-
+          ls -l "$HOME/istio-1.25.0/bin/istioctl" || echo "istioctl not found in $HOME/istio-1.25.0/bin"
           if ! command -v istioctl &> /dev/null; then
             echo "ERROR: istioctl not found after setting PATH. Exiting..."
             exit 1
           fi
 
-          if kubectl get pod -n istio-system -l app=istiod --no-headers 2>/dev/null | grep -q Running; then
-            echo "Istio is already installed and running in the cluster."
+          # Check if Istio is installed by looking for the istio-system namespace
+          if kubectl get namespace istio-system &> /dev/null; then
+            echo "Istio is already installed in the cluster."
+            kubectl get pods -n istio-system
           else
-            echo "Installing Istio into Minikube..."
+            echo "Istio not found in cluster. Installing Istio into Minikube..."
             istioctl install --set profile=demo -y
             kubectl label namespace default istio-injection=enabled --overwrite
             echo "Istio installed successfully."
+            istioctl x precheck
+            kubectl get pods -n istio-system
           fi
-
+          
   Minikube_IP:
     runs-on: self-hosted
     needs: istioctl_install
