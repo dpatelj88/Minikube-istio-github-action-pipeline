@@ -46,6 +46,7 @@ jobs:
           echo "MINIKUBE_IP=$MINIKUBE_IP" >> $GITHUB_ENV
           echo "minikube_ip=$MINIKUBE_IP" >> $GITHUB_OUTPUT
           echo "Minikube IP set to $MINIKUBE_IP"
+          
   istioctl_install:
     runs-on: self-hosted
     needs: [MiniKube_Setup]
@@ -93,6 +94,7 @@ jobs:
             kubectl get pods -n istio-system
           fi
           echo "Minikube IP: $MINIKUBE_IP"
+          
   Deploy_BookInfo:
     runs-on: self-hosted
     needs: [istioctl_install]
