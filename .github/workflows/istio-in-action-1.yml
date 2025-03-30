@@ -28,8 +28,13 @@ jobs:
           sudo systemctl restart docker
           # Create a new shell session for the user to apply group changes
           newgrp docker <<EONG
-          docker ps || echo "Docker access may require runner restart"
-          EONG
+docker ps || echo "Docker access may require runner restart"
+EONG
+          # Ensure the newgrp command runs properly
+          if [ $? -ne 0 ]; then
+            echo "Failed to execute newgrp command."
+            exit 1
+          fi
         else
           echo "Docker is already installed. Skipping installation."
           docker -v
