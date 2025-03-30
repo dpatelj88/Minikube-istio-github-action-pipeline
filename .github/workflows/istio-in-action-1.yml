@@ -15,21 +15,31 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Setup Docker Permissions
+    - name: Check Docker Installation
       run: |
         if ! command -v docker &> /dev/null; then
+          echo "Docker is not installed. Installing Docker..."
           sudo apt update -y
           sudo apt install -y docker.io
           sudo systemctl start docker
           sudo systemctl enable docker
+          sudo usermod -aG docker $USER
+          # Restart Docker service to apply group changes
+          sudo systemctl restart docker
+          # Create a new shell session for the user to apply group changes
+          newgrp docker <<EONG
+          docker ps || echo "Docker access may require runner restart"
+          EONG
+        else
+          echo "Docker is already installed. Skipping installation."
+          docker -v
         fi
-        sudo usermod -aG docker $USER
-        # Restart Docker service to apply group changes
-        sudo systemctl restart docker
-        # Create a new shell session for the user to apply group changes
-        newgrp docker <<EONG
+
+    - name: Debug Docker Status
+      run: |
+        echo "Checking Docker status..."
+        sudo systemctl status docker
         docker ps || echo "Docker access may require runner restart"
-        EONG
 
     - name: Docker Login
       run: |
@@ -179,9 +189,6 @@ jobs:
           export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
           export GATEWAY_URL=$INGRESS_HOST:$INGRESS_PORT
           echo "BookInfo is accessible at: http://$GATEWAY_URL/productpage"
-          # Test the URL with curl
-          echo "Testing access to BookInfo with curl:"
-          curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
           # Test the URL with curl
           echo "Testing access to BookInfo with curl:"
           curl -s -o /dev/null -w "%{http_code}" http://$GATEWAY_URL/productpage || echo "Failed to access BookInfo"
