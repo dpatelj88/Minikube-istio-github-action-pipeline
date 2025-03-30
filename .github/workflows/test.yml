@@ -9,6 +9,6 @@ jobs:
     steps:
       - name: Print Debug Info
         run: |
-          echo "Hello from $(whoami) on $(hostname)"
+          echo "Hello Team from $(whoami) on $(hostname)"
           date
           echo "PATH: $PATH"
