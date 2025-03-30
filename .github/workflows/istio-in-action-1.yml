@@ -33,11 +33,20 @@ jobs:
           docker -v
         fi
 
-    - name: Debug Docker Status
+    - name: Debug Network Connectivity
       run: |
-        echo "Checking Docker status..."
-        systemctl status docker
-        docker ps || echo "Docker access may require runner restart"
+        echo "Checking network connectivity to Docker Hub..."
+        curl -v https://registry-1.docker.io/v2/ || (echo "Network connectivity issue" && exit 1)
+
+    - name: Debug DNS Configuration
+      run: |
+        echo "Checking DNS configuration..."
+        cat /etc/resolv.conf
+
+    - name: Restart Kubelet
+      run: |
+        echo "Restarting kubelet service..."
+        sudo systemctl restart kubelet
 
     - name: Docker Login
       run: |
