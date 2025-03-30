@@ -26,15 +26,8 @@ jobs:
           sudo usermod -aG docker $USER
           # Restart Docker service to apply group changes
           sudo systemctl restart docker
-          # Create a new shell session for the user to apply group changes
-          newgrp docker <<EONG
-docker ps || echo "Docker access may require runner restart"
-EONG
-          # Ensure the newgrp command runs properly
-          if [ $? -ne 0 ]; then
-            echo "Failed to execute newgrp command."
-            exit 1
-          fi
+          # Adding sleep to ensure the group changes take effect
+          sleep 10
         else
           echo "Docker is already installed. Skipping installation."
           docker -v
