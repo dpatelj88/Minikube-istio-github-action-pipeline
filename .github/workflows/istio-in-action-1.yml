@@ -33,6 +33,43 @@ jobs:
           docker -v
         fi
 
+    - name: Install Minikube
+      run: |
+        if ! command -v minikube &> /dev/null; then
+          echo "Minikube is not installed. Installing Minikube..."
+          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+          chmod +x minikube-linux-amd64
+          sudo mv minikube-linux-amd64 /usr/local/bin/minikube
+        else
+          echo "Minikube is already installed."
+          minikube version
+        fi
+
+    - name: Start Minikube
+      run: |
+        if ! minikube status; then
+          echo "Starting Minikube..."
+          minikube start --driver=docker --alsologtostderr
+        else
+          echo "Minikube is already running."
+          kubectl delete all --all --namespace=default
+          kubectl delete all --all -n istio-system
+        fi
+        minikube status || (minikube logs && exit 1)
+
+    - name: Set Minikube IP
+      id: set-ip
+      run: |
+        MINIKUBE_IP=$(minikube ip)
+        if [ -z "$MINIKUBE_IP" ]; then
+          echo "ERROR: Failed to get Minikube IP"
+          minikube status
+          minikube logs
+          exit 1
+        fi
+        echo "MINIKUBE_IP=$MINIKUBE_IP" >> $GITHUB_ENV
+        echo "minikube_ip=$MINIKUBE_IP" >> $GITHUB_OUTPUT
+
     - name: Debug Network Connectivity
       run: |
         echo "Checking network connectivity to Docker Hub..."
@@ -43,12 +80,6 @@ jobs:
         echo "Checking DNS resolution within Minikube..."
         minikube ssh -- nslookup registry-1.docker.io
         minikube ssh -- curl -v https://registry-1.docker.io/v2/ || (echo "DNS resolution issue within Minikube" && exit 1)
-
-    - name: Restart Minikube
-      run: |
-        echo "Restarting Minikube..."
-        minikube stop
-        minikube start
 
     - name: Docker Login
       run: |
@@ -68,48 +99,6 @@ jobs:
         fi
         export PATH="$HOME/bin:$PATH"
         kubectl version --client || echo "kubectl installation failed"
-
-    - name: Install Minikube
-      run: |
-        if ! command -v minikube &> /dev/null; then
-          echo "Installing Minikube..."
-          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-          chmod +x minikube-linux-amd64
-          mkdir -p $HOME/bin
-          mv minikube-linux-amd64 $HOME/bin/minikube
-          echo "PATH=$HOME/bin:$PATH" >> $GITHUB_ENV
-        else
-          echo "Minikube already installed."
-        fi
-        export PATH="$HOME/bin:$PATH"
-        minikube version || echo "Minikube installation failed"
-
-    - name: Start Minikube
-      run: |
-        export PATH="$HOME/bin:$PATH"
-        if ! minikube status; then
-          echo "Starting Minikube..."
-          minikube start --driver=docker --alsologtostderr
-        else
-          echo "Minikube is already running."
-          kubectl delete all --all --namespace=default
-          kubectl delete all --all -n istio-system
-        fi
-        minikube status || (minikube logs && exit 1)
-
-    - name: Set Minikube IP
-      id: set-ip
-      run: |
-        export PATH="$HOME/bin:$PATH"
-        MINIKUBE_IP=$(minikube ip)
-        if [ -z "$MINIKUBE_IP" ]; then
-          echo "ERROR: Failed to get Minikube IP"
-          minikube status
-          minikube logs
-          exit 1
-        fi
-        echo "MINIKUBE_IP=$MINIKUBE_IP" >> $GITHUB_ENV
-        echo "minikube_ip=$MINIKUBE_IP" >> $GITHUB_OUTPUT
 
   istioctl_install:
     runs-on: self-hosted
