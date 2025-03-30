@@ -36,7 +36,7 @@ jobs:
     - name: Debug Docker Status
       run: |
         echo "Checking Docker status..."
-        sudo systemctl status docker
+        systemctl status docker
         docker ps || echo "Docker access may require runner restart"
 
     - name: Docker Login
