@@ -38,15 +38,17 @@ jobs:
         echo "Checking network connectivity to Docker Hub..."
         curl -v https://registry-1.docker.io/v2/ || (echo "Network connectivity issue" && exit 1)
 
-    - name: Debug DNS Configuration
+    - name: Check DNS Resolution within Minikube
       run: |
-        echo "Checking DNS configuration..."
-        cat /etc/resolv.conf
+        echo "Checking DNS resolution within Minikube..."
+        minikube ssh -- nslookup registry-1.docker.io
+        minikube ssh -- curl -v https://registry-1.docker.io/v2/ || (echo "DNS resolution issue within Minikube" && exit 1)
 
-    - name: Restart Kubelet
+    - name: Restart Minikube
       run: |
-        echo "Restarting kubelet service..."
-        sudo systemctl restart kubelet
+        echo "Restarting Minikube..."
+        minikube stop
+        minikube start
 
     - name: Docker Login
       run: |
