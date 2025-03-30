@@ -1,3 +1,7 @@
+# Add these environment variables to your GitHub repository settings
+# DOCKER_USERNAME: your Docker Hub username
+# DOCKER_PASSWORD: your Docker Hub password or access token
+
 name: BookInfo CI/CD with Istio
 
 on:
@@ -25,6 +29,10 @@ jobs:
         fi
         sudo usermod -aG docker $USER
         docker ps || echo "Docker access may require runner restart"
+
+    - name: Docker Login
+      run: |
+        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
     - name: Install kubectl
       run: |
@@ -101,6 +109,7 @@ jobs:
             sudo mv kubectl /usr/local/bin/
           fi
           kubectl version --client
+
       - name: Check and Install Istio
         run: |
           if [ ! -d "$HOME/istio-1.25.0" ]; then
@@ -130,7 +139,7 @@ jobs:
             kubectl get pods -n istio-system
           fi
           echo "Minikube IP: $MINIKUBE_IP"
-          
+
   Deploy_BookInfo:
     runs-on: self-hosted
     needs: [istioctl_install]
