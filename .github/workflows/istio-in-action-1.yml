@@ -1,7 +1,3 @@
-# Add these environment variables to your GitHub repository settings
-# DOCKER_USERNAME: your Docker Hub username
-# DOCKER_PASSWORD: your Docker Hub password or access token
-
 name: BookInfo CI/CD with Istio
 
 on:
@@ -28,7 +24,12 @@ jobs:
           sudo systemctl enable docker
         fi
         sudo usermod -aG docker $USER
+        # Restart Docker service to apply group changes
+        sudo systemctl restart docker
+        # Create a new shell session for the user to apply group changes
+        newgrp docker <<EONG
         docker ps || echo "Docker access may require runner restart"
+        EONG
 
     - name: Docker Login
       run: |
